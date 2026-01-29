@@ -1,0 +1,384 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>鞋业进销存管理系统</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide Icons -->
+    <script src="https://unpkg.com/lucide@latest"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;700;900&display=swap');
+        body { font-family: 'Inter', -apple-system, sans-serif; -webkit-tap-highlight-color: transparent; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+        .safe-bottom { padding-bottom: env(safe-area-inset-bottom); }
+    </style>
+</head>
+<body class="bg-gray-50 text-gray-900">
+    <div id="app" class="max-w-2xl mx-auto min-h-screen pb-24 relative">
+        <!-- 内容由 JavaScript 渲染 -->
+    </div>
+
+    <script>
+        // --- 核心状态 ---
+        let state = {
+            activeTab: 'dashboard', // dashboard, inventory, history
+            inventory: JSON.parse(localStorage.getItem('shoe_inventory') || '[]'),
+            transactions: JSON.parse(localStorage.getItem('shoe_transactions') || '[]'),
+            searchQuery: '',
+            isModalOpen: false,
+            editingItem: null
+        };
+
+        // --- 数据持久化 ---
+        function saveToLocal() {
+            localStorage.setItem('shoe_inventory', JSON.stringify(state.inventory));
+            localStorage.setItem('shoe_transactions', JSON.stringify(state.transactions));
+        }
+
+        // --- 核心功能 ---
+        function render() {
+            const app = document.getElementById('app');
+            app.innerHTML = '';
+
+            // 根据当前标签页渲染
+            if (state.activeTab === 'dashboard') renderDashboard(app);
+            else if (state.activeTab === 'inventory') renderInventory(app);
+            else if (state.activeTab === 'history') renderHistory(app);
+
+            renderNavbar(app);
+            if (state.isModalOpen) renderModal(app);
+            
+            // 初始化图标
+            lucide.createIcons();
+        }
+
+        // --- 仪表盘渲染 ---
+        function renderDashboard(container) {
+            const today = new Date().toDateString();
+            const todayTxs = state.transactions.filter(t => new Date(t.date).toDateString() === today);
+            
+            const stats = {
+                sales: todayTxs.reduce((acc, t) => acc + (t.salePrice * t.quantity), 0),
+                profit: todayTxs.reduce((acc, t) => acc + t.profit, 0),
+                stock: state.inventory.reduce((acc, i) => acc + Number(i.stock), 0),
+                value: state.inventory.reduce((acc, i) => acc + (Number(i.stock) * Number(i.costPrice)), 0)
+            };
+
+            const html = `
+                <div class="p-4 space-y-6 animate-in fade-in duration-300">
+                    <header class="flex justify-between items-center py-2">
+                        <div>
+                            <h1 class="text-2xl font-black text-gray-800">生意概况</h1>
+                            <p class="text-gray-500 text-sm">${new Date().toLocaleDateString()} 经营数据</p>
+                        </div>
+                        <div class="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center text-blue-600">
+                            <i data-lucide="trending-up"></i>
+                        </div>
+                    </header>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div class="bg-gradient-to-br from-blue-600 to-blue-700 p-4 rounded-2xl text-white shadow-lg">
+                            <p class="opacity-80 text-xs font-bold mb-1">今日销售额</p>
+                            <h2 class="text-2xl font-black">￥${stats.sales.toLocaleString()}</h2>
+                        </div>
+                        <div class="bg-gradient-to-br from-emerald-500 to-emerald-600 p-4 rounded-2xl text-white shadow-lg">
+                            <p class="opacity-80 text-xs font-bold mb-1">今日利润</p>
+                            <h2 class="text-2xl font-black">￥${stats.profit.toLocaleString()}</h2>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                            <p class="text-gray-400 text-xs font-bold mb-1">库存双数</p>
+                            <h2 class="text-2xl font-black text-gray-800">${stats.stock} <span class="text-sm font-normal text-gray-400">双</span></h2>
+                        </div>
+                        <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100">
+                            <p class="text-gray-400 text-xs font-bold mb-1">库存货值</p>
+                            <h2 class="text-xl font-black text-gray-800">￥${stats.value.toLocaleString()}</h2>
+                        </div>
+                    </div>
+
+                    <section class="space-y-3">
+                        <h3 class="font-bold text-gray-700 ml-1">快速操作</h3>
+                        <div class="grid grid-cols-2 gap-3">
+                            <button onclick="openAddModal()" class="flex items-center justify-center gap-2 p-4 bg-white rounded-xl border-2 border-dashed border-gray-200 text-gray-600 active:bg-gray-50">
+                                <i data-lucide="plus" size="20"></i> <span class="font-semibold">新货入库</span>
+                            </button>
+                            <button onclick="switchTab('inventory')" class="flex items-center justify-center gap-2 p-4 bg-white rounded-xl border-2 border-dashed border-gray-200 text-gray-600 active:bg-gray-50">
+                                <i data-lucide="package" size="20"></i> <span class="font-semibold">开单出库</span>
+                            </button>
+                        </div>
+                    </section>
+
+                    <section class="bg-white rounded-2xl p-4 shadow-sm border border-gray-100">
+                        <h3 class="font-bold text-gray-800 mb-4 flex items-center gap-2">
+                            <i data-lucide="history" size="18" class="text-blue-500"></i> 最近成交
+                        </h3>
+                        <div class="space-y-4">
+                            ${todayTxs.slice(0, 5).map(t => `
+                                <div class="flex justify-between items-center border-b border-gray-50 pb-3 last:border-0 last:pb-0">
+                                    <div>
+                                        <p class="font-bold text-gray-800">${t.name}</p>
+                                        <p class="text-[10px] text-gray-400">${new Date(t.date).toLocaleTimeString()} · ${t.quantity}双</p>
+                                    </div>
+                                    <p class="font-black text-emerald-600">+￥${t.salePrice * t.quantity}</p>
+                                </div>
+                            `).join('') || '<p class="text-center text-gray-400 py-4 text-sm">今日暂无成交记录</p>'}
+                        </div>
+                    </section>
+                </div>
+            `;
+            container.innerHTML += html;
+        }
+
+        // --- 库存页渲染 ---
+        function renderInventory(container) {
+            const filtered = state.inventory.filter(i => 
+                i.name.includes(state.searchQuery) || i.brand.includes(state.searchQuery)
+            );
+
+            const html = `
+                <div class="p-4 space-y-4 animate-in slide-in-from-right duration-300">
+                    <div class="relative">
+                        <i data-lucide="search" class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size="18"></i>
+                        <input oninput="search(this.value)" value="${state.searchQuery}" placeholder="搜索鞋子、品牌..." class="w-full pl-10 pr-4 py-3 bg-white rounded-xl shadow-sm border-none focus:ring-2 focus:ring-blue-500 outline-none">
+                    </div>
+                    
+                    <div class="flex justify-between items-center px-1">
+                        <h2 class="font-black text-gray-800">仓库列表 (${filtered.length})</h2>
+                        <button onclick="openAddModal()" class="text-blue-600 text-sm font-bold flex items-center gap-1">
+                            <i data-lucide="plus" size="16"></i> 添加
+                        </button>
+                    </div>
+
+                    <div class="space-y-4 pb-10">
+                        ${filtered.map(item => `
+                            <div class="bg-white rounded-2xl overflow-hidden shadow-sm flex border border-gray-100">
+                                <div class="w-28 h-28 bg-gray-100 shrink-0">
+                                    ${item.image ? `<img src="${item.image}" class="w-full h-full object-cover">` : `<div class="w-full h-full flex items-center justify-center text-gray-300"><i data-lucide="camera"></i></div>`}
+                                </div>
+                                <div class="p-3 flex-1 flex flex-col justify-between">
+                                    <div>
+                                        <div class="flex justify-between items-start">
+                                            <h3 class="font-bold text-gray-800 line-clamp-1">${item.name}</h3>
+                                            <div class="flex gap-2 text-gray-300">
+                                                <i data-lucide="edit-3" size="14" onclick="editItem(${item.id})"></i>
+                                                <i data-lucide="trash-2" size="14" class="text-red-200" onclick="deleteItem(${item.id})"></i>
+                                            </div>
+                                        </div>
+                                        <p class="text-[10px] text-gray-400">${item.brand} | 码数: ${item.sizes}</p>
+                                        <div class="flex items-baseline gap-2">
+                                            <span class="text-lg font-black text-blue-600">￥${item.suggestedPrice}</span>
+                                            <span class="text-[10px] text-gray-400 line-through">进:￥${item.costPrice}</span>
+                                        </div>
+                                    </div>
+                                    <div class="flex items-center justify-between mt-1">
+                                        <span class="px-2 py-0.5 rounded text-[10px] font-bold ${item.stock < 5 ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-600'}">库存: ${item.stock}</span>
+                                        <button onclick="makeSale(${item.id})" class="bg-blue-600 text-white text-[10px] px-4 py-1.5 rounded-lg font-bold shadow-md active:scale-90 transition-transform">开单</button>
+                                    </div>
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+        }
+
+        // --- 账本页渲染 ---
+        function renderHistory(container) {
+            const html = `
+                <div class="p-4 space-y-4 animate-in slide-in-from-left duration-300">
+                    <h2 class="text-xl font-bold px-1">流水账单</h2>
+                    <div class="space-y-3">
+                        ${state.transactions.map(t => `
+                            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100">
+                                <div class="flex justify-between items-start mb-2">
+                                    <span class="font-bold text-gray-800">${t.name}</span>
+                                    <span class="text-[10px] text-gray-400">${new Date(t.date).toLocaleString()}</span>
+                                </div>
+                                <div class="grid grid-cols-3 gap-2">
+                                    <div><p class="text-gray-400 text-[10px]">单价</p><p class="font-bold">￥${t.salePrice}</p></div>
+                                    <div><p class="text-gray-400 text-[10px]">数量</p><p class="font-bold">${t.quantity}双</p></div>
+                                    <div><p class="text-gray-400 text-[10px]">盈利</p><p class="font-bold text-emerald-600">￥${t.profit}</p></div>
+                                </div>
+                            </div>
+                        `).reverse().join('') || '<p class="text-center text-gray-400 py-10">尚无成交记录</p>'}
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+        }
+
+        // --- 底部导航栏 ---
+        function renderNavbar(container) {
+            const nav = `
+                <nav class="fixed bottom-0 inset-x-0 bg-white border-t border-gray-200 px-6 py-3 flex justify-between items-center z-40 max-w-2xl mx-auto safe-bottom shadow-[0_-5px_20px_rgba(0,0,0,0.05)]">
+                    <button onclick="switchTab('dashboard')" class="flex flex-col items-center gap-1 ${state.activeTab === 'dashboard' ? 'text-blue-600' : 'text-gray-400'}">
+                        <i data-lucide="layout"></i><span class="text-[10px] font-bold">看板</span>
+                    </button>
+                    <button onclick="switchTab('inventory')" class="flex flex-col items-center gap-1 ${state.activeTab === 'inventory' ? 'text-blue-600' : 'text-gray-400'}">
+                        <i data-lucide="package"></i><span class="text-[10px] font-bold">仓库</span>
+                    </button>
+                    <div class="relative -top-6">
+                        <button onclick="openAddModal()" class="bg-blue-600 text-white w-14 h-14 rounded-full flex items-center justify-center shadow-lg shadow-blue-300 ring-4 ring-white active:scale-90 transition-transform">
+                            <i data-lucide="plus" size="32"></i>
+                        </button>
+                    </div>
+                    <button onclick="switchTab('history')" class="flex flex-col items-center gap-1 ${state.activeTab === 'history' ? 'text-blue-600' : 'text-gray-400'}">
+                        <i data-lucide="history"></i><span class="text-[10px] font-bold">账本</span>
+                    </button>
+                    <button onclick="alert('系统设置功能即将推出')" class="flex flex-col items-center gap-1 text-gray-400">
+                        <i data-lucide="settings"></i><span class="text-[10px] font-bold">设置</span>
+                    </button>
+                </nav>
+            `;
+            container.innerHTML += nav;
+        }
+
+        // --- 弹窗逻辑 ---
+        function renderModal(container) {
+            const item = state.editingItem || {};
+            const html = `
+                <div class="fixed inset-0 bg-black/60 z-50 flex items-end sm:items-center justify-center p-0 sm:p-4 animate-in fade-in duration-200">
+                    <div class="bg-white w-full max-w-lg rounded-t-3xl sm:rounded-3xl max-h-[90vh] overflow-y-auto p-6 shadow-2xl">
+                        <div class="flex justify-between items-center mb-6">
+                            <h2 class="text-xl font-black">${state.editingItem ? '修改商品' : '新鞋入库'}</h2>
+                            <button onclick="closeModal()" class="p-2 text-gray-400"><i data-lucide="x"></i></button>
+                        </div>
+
+                        <div class="space-y-4">
+                            <div id="imagePlaceholder" onclick="triggerCamera()" class="w-full h-44 bg-gray-50 rounded-2xl border-2 border-dashed border-gray-200 flex flex-col items-center justify-center overflow-hidden">
+                                ${item.image ? `<img src="${item.image}" class="w-full h-full object-cover">` : `<i data-lucide="camera" class="text-gray-300 mb-1" size="32"></i><span class="text-gray-400 text-xs font-bold">点击拍照记录款式</span>`}
+                            </div>
+                            <input type="file" id="cameraInput" hidden accept="image/*" capture="environment" onchange="handlePhoto(this)">
+                            
+                            <div class="grid grid-cols-2 gap-4">
+                                <div class="col-span-2">
+                                    <label class="text-[10px] font-bold text-gray-400 ml-1">商品名称</label>
+                                    <input id="f-name" value="${item.name || ''}" placeholder="例如：耐克空军一号" class="w-full p-3 bg-gray-50 rounded-xl border-none outline-none ring-1 ring-gray-100 focus:ring-2 focus:ring-blue-500">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-gray-400 ml-1">品牌</label>
+                                    <input id="f-brand" value="${item.brand || ''}" placeholder="品牌名" class="w-full p-3 bg-gray-50 rounded-xl border-none outline-none ring-1 ring-gray-100">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-gray-400 ml-1">尺码范围</label>
+                                    <input id="f-sizes" value="${item.sizes || ''}" placeholder="如 38-44" class="w-full p-3 bg-gray-50 rounded-xl border-none outline-none ring-1 ring-gray-100">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-gray-400 ml-1">进价 (￥)</label>
+                                    <input id="f-cost" type="number" value="${item.costPrice || ''}" placeholder="0.00" class="w-full p-3 bg-gray-50 rounded-xl border-none outline-none ring-1 ring-gray-100">
+                                </div>
+                                <div>
+                                    <label class="text-[10px] font-bold text-gray-400 ml-1">售价 (￥)</label>
+                                    <input id="f-price" type="number" value="${item.suggestedPrice || ''}" placeholder="0.00" class="w-full p-3 bg-gray-50 rounded-xl border-none outline-none ring-1 ring-gray-100">
+                                </div>
+                                <div class="col-span-2">
+                                    <label class="text-[10px] font-bold text-gray-400 ml-1">初始库存 (双)</label>
+                                    <input id="f-stock" type="number" value="${item.stock || ''}" placeholder="0" class="w-full p-3 bg-gray-50 rounded-xl border-none outline-none ring-1 ring-gray-100">
+                                </div>
+                            </div>
+
+                            <button onclick="saveItem()" class="w-full bg-blue-600 text-white font-black py-4 rounded-2xl shadow-lg active:scale-95 transition-transform mt-2">
+                                立即保存
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            container.innerHTML += html;
+        }
+
+        // --- 交互函数 ---
+        function switchTab(tab) { state.activeTab = tab; render(); }
+        function search(val) { state.searchQuery = val; renderInventory(document.getElementById('app')); lucide.createIcons(); }
+        function openAddModal() { state.isModalOpen = true; render(); }
+        function closeModal() { state.isModalOpen = false; state.editingItem = null; render(); }
+        function triggerCamera() { document.getElementById('cameraInput').click(); }
+
+        function handlePhoto(input) {
+            const file = input.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = document.querySelector('#imagePlaceholder img') || document.createElement('img');
+                    img.src = e.target.result;
+                    img.className = 'w-full h-full object-cover';
+                    const placeholder = document.getElementById('imagePlaceholder');
+                    placeholder.innerHTML = '';
+                    placeholder.appendChild(img);
+                    state.tempImage = e.target.result;
+                };
+                reader.readAsDataURL(file);
+            }
+        }
+
+        function saveItem() {
+            const newItem = {
+                id: state.editingItem ? state.editingItem.id : Date.now(),
+                name: document.getElementById('f-name').value,
+                brand: document.getElementById('f-brand').value,
+                sizes: document.getElementById('f-sizes').value,
+                costPrice: Number(document.getElementById('f-cost').value),
+                suggestedPrice: Number(document.getElementById('f-price').value),
+                stock: Number(document.getElementById('f-stock').value),
+                image: state.tempImage || (state.editingItem ? state.editingItem.image : null)
+            };
+
+            if (state.editingItem) {
+                state.inventory = state.inventory.map(i => i.id === newItem.id ? newItem : i);
+            } else {
+                state.inventory.push(newItem);
+            }
+
+            saveToLocal();
+            state.tempImage = null;
+            closeModal();
+        }
+
+        function editItem(id) {
+            state.editingItem = state.inventory.find(i => i.id === id);
+            state.isModalOpen = true;
+            render();
+        }
+
+        function deleteItem(id) {
+            if (confirm('确定要删除这款鞋子吗？')) {
+                state.inventory = state.inventory.filter(i => i.id !== id);
+                saveToLocal();
+                render();
+            }
+        }
+
+        function makeSale(id) {
+            const item = state.inventory.find(i => i.id === id);
+            const qty = prompt(`[${item.name}] 卖出多少双？`, "1");
+            if (qty === null) return;
+            const price = prompt(`成交价 (单价)?`, item.suggestedPrice);
+            if (price === null) return;
+
+            const q = Number(qty);
+            const p = Number(price);
+
+            if (item.stock < q) return alert('库存不足！');
+
+            item.stock -= q;
+            state.transactions.push({
+                id: Date.now(),
+                name: item.name,
+                quantity: q,
+                salePrice: p,
+                costPrice: item.costPrice,
+                profit: (p - item.costPrice) * q,
+                date: new Date().toISOString()
+            });
+
+            saveToLocal();
+            render();
+            alert('开单成功！');
+        }
+
+        // 初始化
+        render();
+    </script>
+</body>
+</html>
